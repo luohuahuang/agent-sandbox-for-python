@@ -6,7 +6,7 @@
 #   - `uvicorn app.main:app --port 8080` is already running.
 #   - .env defines SANDBOX_API_KEY (or set it inline below).
 #
-# Usage: bash scripts/smoke.sh
+# Usage: bash scripts/smoke_basic.sh
 
 set -euo pipefail
 

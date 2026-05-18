@@ -12,6 +12,7 @@ from app.routers import exec as exec_router
 from app.routers import health, sessions
 from app.runtime.docker_runtime import DockerRuntime
 from app.runtime.manager import SessionManager
+from app.runtime.proxy import EgressProxy
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +25,24 @@ async def lifespan(app: FastAPI):
     )
     settings = get_settings()
     runtime = DockerRuntime(settings)
+
+    proxy: EgressProxy | None = None
+    try:
+        proxy = EgressProxy(settings, runtime.client())
+        await proxy.start()
+        runtime.attach_proxy(proxy)
+    except Exception as exc:
+        logger.error(
+            "egress proxy bootstrap failed: %s — sandboxes will run on the "
+            "default bridge with no isolation. Fix this before production.",
+            exc,
+        )
+
     manager = SessionManager(settings, runtime)
     app.state.settings = settings
     app.state.runtime = runtime
     app.state.manager = manager
+    app.state.proxy = proxy
 
     logger.info("agent-sandbox gateway starting (image=%s)", settings.sandbox_image)
     try:
@@ -35,6 +50,8 @@ async def lifespan(app: FastAPI):
     finally:
         logger.info("agent-sandbox gateway shutting down")
         await manager.shutdown()
+        if proxy is not None:
+            await proxy.stop()
 
 
 def create_app() -> FastAPI:

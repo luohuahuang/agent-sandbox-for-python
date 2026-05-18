@@ -28,7 +28,9 @@ class Settings(BaseSettings):
     max_sessions: int = 32
 
     egress_allowlist: str = "pypi.org,files.pythonhosted.org,*.pythonhosted.org"
-    proxy_image: str = "agent-sandbox-proxy:latest"
+    proxy_image: str = "ubuntu/squid:latest"
+    proxy_container_name: str = "sbx-proxy"
+    network_name: str = "sbx-net"
 
     @property
     def mem_limit_bytes(self) -> int:

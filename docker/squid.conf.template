@@ -1,0 +1,38 @@
+# agent-sandbox egress proxy config (rendered from EGRESS_ALLOWLIST).
+# Sandbox containers reach this proxy via http://sbx-proxy:3128.
+# Only HTTP/HTTPS to whitelisted domains is permitted.
+
+http_port 3128
+
+visible_hostname sbx-proxy
+
+# Destination-domain allowlist; entries are squid dstdomain form (with leading dot
+# for subdomain matching). Rendered from agent-sandbox config.EGRESS_ALLOWLIST.
+acl allowed_sites dstdomain {{ALLOWED_DOMAINS}}
+
+acl Safe_ports port 80
+acl Safe_ports port 443
+acl SSL_ports  port 443
+acl CONNECT method CONNECT
+
+# Block CONNECT tunnels to non-HTTPS ports (no SSH-over-CONNECT exfil).
+http_access deny CONNECT !SSL_ports
+
+# Block any non-safe port.
+http_access deny !Safe_ports
+
+# Whitelist passes.
+http_access allow allowed_sites
+
+# Default deny.
+http_access deny all
+
+# Don't leak the upstream client identity or proxy presence.
+forwarded_for delete
+via off
+
+# Use the image's default log paths (/var/log/squid/{access,cache}.log).
+# `docker exec sbx-proxy tail -f /var/log/squid/access.log` for live tail.
+
+# This is a forwarding gate, not a cache.
+cache deny all

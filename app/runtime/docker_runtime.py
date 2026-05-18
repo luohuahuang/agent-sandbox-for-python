@@ -1,7 +1,8 @@
 """Thin async wrapper over docker SDK for sandbox container lifecycle.
 
-Phase 1: no security hardening flags are applied yet — read-only rootfs,
-cap_drop, no-new-privileges, network policy all land in Phase 2.
+Phase 2: applies the hardening defaults — read-only rootfs, tmpfs for
+/tmp + /home/sbx, cap_drop=ALL, no-new-privileges, ulimits, sbx-net
+attachment, HTTP_PROXY env. Mostly per-container args in `create()`.
 """
 
 from __future__ import annotations
@@ -18,9 +19,11 @@ from pathlib import Path
 
 from docker.errors import APIError, ImageNotFound, NotFound
 from docker.models.containers import Container
+from docker.types import Ulimit
 
 import docker
 from app.config import Settings
+from app.runtime.proxy import EgressProxy
 
 logger = logging.getLogger(__name__)
 
@@ -92,9 +95,24 @@ class ContainerHandle:
 
 
 class DockerRuntime:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self, settings: Settings, proxy: EgressProxy | None = None
+    ) -> None:
         self._settings = settings
+        self._proxy = proxy
         self._client: docker.DockerClient | None = None
+
+    @property
+    def proxy(self) -> EgressProxy | None:
+        return self._proxy
+
+    def attach_proxy(self, proxy: EgressProxy) -> None:
+        """Wire the proxy in after the docker client is constructed.
+
+        EgressProxy needs the docker client, which DockerRuntime owns;
+        main.py builds runtime → client → proxy → attach.
+        """
+        self._proxy = proxy
 
     def _client_or_connect(self) -> docker.DockerClient:
         if self._client is None:
@@ -105,6 +123,10 @@ class DockerRuntime:
             else:
                 self._client = docker.from_env()
         return self._client
+
+    def client(self) -> docker.DockerClient:
+        """Public accessor for the underlying docker client (lazy)."""
+        return self._client_or_connect()
 
     async def healthcheck(self) -> bool:
         def _ping() -> bool:
@@ -123,13 +145,31 @@ class DockerRuntime:
 
         workspace_path = settings.workspace_root / session_id
         workspace_path.mkdir(parents=True, exist_ok=True)
-        # uid 1000 in the container needs to write here. Phase 2 will tighten this.
+        # uid 1000 in the container needs to write here; the rootfs is
+        # read-only at runtime, only /workspace and the tmpfs mounts are
+        # writable.
         workspace_path.chmod(0o777)
 
         port_bindings = {
             container_port: ("127.0.0.1", None)  # None -> ephemeral host port
             for container_port in KERNEL_PORTS.values()
         }
+
+        env = {"KERNEL_KEY": kernel_key}
+        network = "bridge"  # last-resort fallback
+        if self._proxy is not None:
+            if self._proxy.network_ready:
+                network = self._proxy.network_name
+            else:
+                logger.warning(
+                    "egress proxy network not ready; sandbox %s will run on "
+                    "default bridge (NOT isolated)",
+                    session_id,
+                )
+            if self._proxy.proxy_ready:
+                env["HTTP_PROXY"] = self._proxy.http_proxy_url
+                env["HTTPS_PROXY"] = self._proxy.http_proxy_url
+                env["NO_PROXY"] = "127.0.0.1,localhost"
 
         def _run() -> Container:
             client = self._client_or_connect()
@@ -138,14 +178,27 @@ class DockerRuntime:
                     image=settings.sandbox_image,
                     detach=True,
                     name=f"sbx-{session_id}",
-                    environment={"KERNEL_KEY": kernel_key},
+                    environment=env,
                     ports=port_bindings,
                     volumes={
                         str(workspace_path): {"bind": "/workspace", "mode": "rw"},
                     },
+                    network=network,
                     mem_limit=f"{settings.mem_limit_mb}m",
+                    memswap_limit=f"{settings.mem_limit_mb}m",
                     nano_cpus=settings.cpu_nanos,
                     pids_limit=settings.pids_limit,
+                    read_only=True,
+                    tmpfs={
+                        "/tmp": "size=64m,mode=1777",
+                        "/home/sbx": "size=64m,mode=1777",
+                    },
+                    cap_drop=["ALL"],
+                    security_opt=["no-new-privileges:true"],
+                    ulimits=[
+                        Ulimit(name="nofile", soft=1024, hard=1024),
+                        Ulimit(name="nproc", soft=256, hard=256),
+                    ],
                 )
             except ImageNotFound:
                 raise RuntimeError(
