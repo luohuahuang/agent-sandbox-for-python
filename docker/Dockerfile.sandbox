@@ -1,0 +1,29 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN useradd -u 1000 -m sbx
+
+RUN pip install --no-cache-dir \
+        ipykernel==6.29.5 \
+        jupyter_client==8.6.2 \
+        numpy \
+        pandas \
+        matplotlib \
+        requests \
+        httpx \
+        pytest
+
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh && \
+    mkdir -p /workspace && chown 1000:1000 /workspace
+
+USER sbx
+WORKDIR /workspace
+
+EXPOSE 5555 5556 5557 5558 5559
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
