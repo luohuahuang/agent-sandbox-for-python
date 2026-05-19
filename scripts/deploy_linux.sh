@@ -93,11 +93,23 @@ phase_system_deps() {
 # ───────────────────────────────────────────────────────────────────────────
 phase_docker_check() {
     log "Phase 2/7 — docker access"
-    if ! docker ps >/dev/null 2>&1; then
-        fail "docker ps failed — likely the group change hasn't taken effect; \
-log out + back in then re-run, or run 'newgrp docker' in the same shell first"
+    if docker ps >/dev/null 2>&1; then
+        ok "docker reachable"
+        return
     fi
-    ok "docker reachable"
+    # Most common case: Phase 1 just added us to the docker group, but the
+    # current shell doesn't have that membership active yet. Re-exec the
+    # script under `sg docker` so we pick up the group without forcing the
+    # user to log out + back in. SG_REEXEC guards against infinite loops.
+    if id -nG "$USER" | grep -qw docker; then
+        if [ -z "${SG_REEXEC:-}" ] && command -v sg >/dev/null 2>&1; then
+            log "  current shell lacks the docker group; re-executing under 'sg docker' ..."
+            export SG_REEXEC=1
+            exec sg docker -c "$(readlink -f "$0")"
+        fi
+        fail "docker ps failed even after re-exec; log out and SSH back in, then re-run"
+    fi
+    fail "docker ps failed and \$USER is not in the docker group — Phase 1 incomplete?"
 }
 
 # ───────────────────────────────────────────────────────────────────────────
