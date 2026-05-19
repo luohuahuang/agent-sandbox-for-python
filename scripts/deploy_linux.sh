@@ -96,7 +96,16 @@ phase_system_deps() {
 
     case "$PKG_MGR" in
         dnf)
-            sudo dnf install -y git curl openssl which >/dev/null
+            # AL2023 ships curl-minimal (provides curl); installing the full
+            # `curl` package would conflict. Only install what's actually
+            # missing.
+            local need=()
+            command -v git     >/dev/null 2>&1 || need+=(git)
+            command -v curl    >/dev/null 2>&1 || need+=(curl)
+            command -v openssl >/dev/null 2>&1 || need+=(openssl)
+            if [ ${#need[@]} -gt 0 ]; then
+                sudo dnf install -y "${need[@]}" >/dev/null
+            fi
             if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
                 log "  installing $PYTHON_BIN via dnf ..."
                 sudo dnf install -y python3.11 >/dev/null \
@@ -116,7 +125,12 @@ phase_system_deps() {
         apt)
             export DEBIAN_FRONTEND=noninteractive
             sudo apt-get update -qq
-            sudo apt-get install -y -q git curl openssl ca-certificates >/dev/null
+            local need=()
+            command -v git     >/dev/null 2>&1 || need+=(git)
+            command -v curl    >/dev/null 2>&1 || need+=(curl)
+            command -v openssl >/dev/null 2>&1 || need+=(openssl)
+            need+=(ca-certificates)  # always idempotent; covers cert refreshes
+            sudo apt-get install -y -q "${need[@]}" >/dev/null
             if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
                 log "  installing $PYTHON_BIN via apt ..."
                 # Ubuntu 24.04 has python3.12 default but python3.11 in repos;
