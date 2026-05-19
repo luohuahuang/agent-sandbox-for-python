@@ -21,6 +21,10 @@
 #                                  for CN-region ECS where docker.io is
 #                                  unreachable; writes /etc/docker/daemon.json
 #                                  and restarts the daemon
+#   PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+#                                  CN PyPI mirror used when building the
+#                                  sandbox image (build-time only — runtime
+#                                  egress is still gated by the squid proxy)
 
 set -euo pipefail
 
@@ -178,7 +182,16 @@ phase_images() {
 
     if ! docker image inspect agent-sandbox:latest >/dev/null 2>&1; then
         log "  building agent-sandbox:latest (~2-3 min on first run)"
-        docker build -t agent-sandbox:latest \
+        local build_args=()
+        if [ -n "${PIP_INDEX_URL:-}" ]; then
+            build_args+=(--build-arg "PIP_INDEX_URL=$PIP_INDEX_URL")
+            # Derive the trusted host (skip cert checks for http mirrors).
+            local host
+            host=$(echo "$PIP_INDEX_URL" | awk -F[/:] '{print $4}')
+            [ -n "$host" ] && build_args+=(--build-arg "PIP_TRUSTED_HOST=$host")
+            log "  using PyPI mirror: $PIP_INDEX_URL"
+        fi
+        docker build "${build_args[@]}" -t agent-sandbox:latest \
             -f "$REPO_DIR/docker/Dockerfile.sandbox" \
             "$REPO_DIR/docker/" >/dev/null
     fi

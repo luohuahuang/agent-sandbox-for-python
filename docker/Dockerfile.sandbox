@@ -1,9 +1,16 @@
 FROM python:3.11-slim
 
+# Optional PyPI mirror for build-time pip install (e.g. on CN-region hosts
+# where pypi.org is slow). Leave empty for default (pypi.org).
+ARG PIP_INDEX_URL=""
+ARG PIP_TRUSTED_HOST=""
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_INDEX_URL=${PIP_INDEX_URL} \
+    PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST}
 
 RUN useradd -u 1000 -m sbx
 
