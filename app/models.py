@@ -20,6 +20,10 @@ class SessionInfo(BaseModel):
     status: str
     created_at: datetime
     idle_seconds: int = 0
+    # Phase 3: live resource snapshot from container.stats. None if the
+    # sample failed (container gone, daemon timeout). Always best-effort.
+    mem_usage_mb: float | None = None
+    cpu_total_ms: int | None = None
 
 
 class CreateSessionResponse(BaseModel):
@@ -53,3 +57,29 @@ class ExecResponse(BaseModel):
 class ErrorResponse(BaseModel):
     error: str
     detail: str | None = None
+
+
+class AuditRecord(BaseModel):
+    """One row from the sandbox-local exec_audit table."""
+
+    audit_id: str
+    session_id: str
+    conversation_id: str | None = None
+    agent_id: str | None = None
+    trace_id: str | None = None
+    started_at: str
+    duration_ms: int
+    code: str
+    stdout: str | None = None
+    stderr: str | None = None
+    result_preview: str | None = None
+    ok: bool
+    error_name: str | None = None
+    exit_reason: str | None = None
+    mem_peak_kb: int | None = None
+    cpu_ms: int | None = None
+
+
+class SessionExecListResponse(BaseModel):
+    session_id: str
+    execs: list[AuditRecord]

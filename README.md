@@ -4,23 +4,30 @@ A standalone HTTP service that runs LLM-generated code inside **per-session Dock
 
 ## Status
 
-Phase 2 — hardening + egress proxy. See the implementation plan for the
-full phase breakdown.
+Phase 3 — sandbox-local audit DB + live resource sampling. See the
+implementation plan for the full phase breakdown.
 
 What's in today:
 
 - `POST /v1/sessions`, `POST /v1/sessions/{id}/exec` (non-streaming),
   `DELETE /v1/sessions/{id}`, `GET /v1/sessions`, `GET /healthz`.
+- **`GET /v1/audit/{audit_id}`** and **`GET /v1/audit/sessions/{id}/execs`**
+  return full exec history (complete stdout / stderr / code, no 300-char
+  truncation), persisted to a sandbox-local SQLite DB at `AUDIT_DB_PATH`.
 - Per-conversation idempotent session creation; per-session asyncio lock
   serializes execs on one kernel; max-session cap.
 - Jupyter kernel inside a sandbox container; gateway talks to it over
   loopback-published ZMQ ports.
+- **`ExecResponse.resource_peak`** now carries `{mem_peak_kb, cpu_ms}`
+  sampled from `docker stats` post-exec; `GET /v1/sessions/{id}` returns
+  `mem_usage_mb` and `cpu_total_ms` snapshots.
 - **Phase 2 hardening per container**: read-only rootfs, tmpfs for `/tmp`
   and `/home/sbx`, `cap_drop=ALL`, `no-new-privileges`, ulimits
   (`nofile=1024`, `nproc=256`), `mem_limit`, `nano_cpus`, `pids_limit`,
   `memswap_limit` = mem_limit (no swap).
-- **Network isolation**: sandbox containers attach to `sbx-net`, an
-  `--internal` bridge — no direct internet route.
+- **Network isolation**: sandbox containers attach to `sbx-net` (a
+  user-defined bridge with `enable_ip_masquerade=false`) — no direct
+  internet route.
 - **Egress proxy**: `sbx-proxy` (stock `ubuntu/squid`) sidecar straddles
   `sbx-net` + the default bridge, applies a `dstdomain` allowlist
   rendered from `EGRESS_ALLOWLIST` (default: `pypi.org`,
@@ -29,9 +36,10 @@ What's in today:
 
 Still deferred:
 
-- SSE streaming (Phase 3), files API (Phase 4), sandbox-local audit DB
-  + reaper (Phase 5-6), proper proxy readiness probe (Phase 6), CI
-  (Phase 7).
+- Idle reaper + `/metrics` (Phase 4)
+- Files API for upload/download of artifacts (Phase 5, on demand)
+- SSE streaming + interrupt (Phase 6, on demand)
+- CI + ruff pre-commit (Phase 7)
 
 ## Quickstart (developer, macOS + Colima)
 

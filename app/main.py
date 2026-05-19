@@ -7,7 +7,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.audit import AuditWriter
 from app.config import get_settings
+from app.routers import audit as audit_router
 from app.routers import exec as exec_router
 from app.routers import health, sessions
 from app.runtime.docker_runtime import DockerRuntime
@@ -26,6 +28,9 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     runtime = DockerRuntime(settings)
 
+    audit = AuditWriter(settings.audit_db_path)
+    await audit.start()
+
     proxy: EgressProxy | None = None
     try:
         proxy = EgressProxy(settings, runtime.client())
@@ -38,11 +43,12 @@ async def lifespan(app: FastAPI):
             exc,
         )
 
-    manager = SessionManager(settings, runtime)
+    manager = SessionManager(settings, runtime, audit)
     app.state.settings = settings
     app.state.runtime = runtime
     app.state.manager = manager
     app.state.proxy = proxy
+    app.state.audit = audit
 
     logger.info("agent-sandbox gateway starting (image=%s)", settings.sandbox_image)
     try:
@@ -52,6 +58,7 @@ async def lifespan(app: FastAPI):
         await manager.shutdown()
         if proxy is not None:
             await proxy.stop()
+        await audit.stop()
 
 
 def create_app() -> FastAPI:
@@ -64,6 +71,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(sessions.router)
     app.include_router(exec_router.router)
+    app.include_router(audit_router.router)
     return app
 
 

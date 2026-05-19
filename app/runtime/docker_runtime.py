@@ -290,6 +290,41 @@ class DockerRuntime:
 
         return await asyncio.to_thread(_do)
 
+    async def stats(self, container_id: str) -> dict | None:
+        """One-shot non-streaming container resource sample.
+
+        Returns ``{mem_usage_bytes, mem_peak_bytes, cpu_total_ns}`` or
+        ``None`` if the container is gone or stats are unavailable.
+        ``mem_peak_bytes`` is the cumulative peak since the container
+        started (cgroup v1 ``max_usage``); on cgroup v2 hosts where
+        ``max_usage`` isn't exposed we fall back to ``mem_usage_bytes``.
+        First call per container is ~200-500ms (the daemon collects a
+        cgroup snapshot); callers should expect that cost.
+        """
+
+        def _do() -> dict | None:
+            try:
+                c = self._client_or_connect().containers.get(container_id)
+            except NotFound:
+                return None
+            try:
+                raw = c.stats(stream=False)
+            except APIError as exc:
+                logger.debug("stats failed for %s: %s", container_id, exc)
+                return None
+            mem = raw.get("memory_stats") or {}
+            cpu = (raw.get("cpu_stats") or {}).get("cpu_usage") or {}
+            usage = int(mem.get("usage") or 0)
+            peak = int(mem.get("max_usage") or usage)
+            cpu_total_ns = int(cpu.get("total_usage") or 0)
+            return {
+                "mem_usage_bytes": usage,
+                "mem_peak_bytes": peak,
+                "cpu_total_ns": cpu_total_ns,
+            }
+
+        return await asyncio.to_thread(_do)
+
     async def close(self) -> None:
         if self._client is not None:
             await asyncio.to_thread(self._client.close)

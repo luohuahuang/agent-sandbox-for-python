@@ -2,7 +2,8 @@
 
 Phase 1 scope: in-memory map, idempotent get_or_create keyed on
 conversation_id, per-session exec serialization, max-session cap.
-Audit DB and idle reaper land in later phases.
+Phase 3: session-lifecycle events go to the sandbox-local audit DB
+(AuditWriter, optional — None in tests).
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from collections.abc import Iterable
 
 from fastapi import HTTPException, status
 
+from app.audit import AuditWriter
 from app.config import Settings
 from app.models import CreateSessionRequest
 from app.runtime.docker_runtime import DockerRuntime
@@ -23,9 +25,15 @@ logger = logging.getLogger(__name__)
 
 
 class SessionManager:
-    def __init__(self, settings: Settings, runtime: DockerRuntime) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        runtime: DockerRuntime,
+        audit: AuditWriter | None = None,
+    ) -> None:
         self._settings = settings
         self._runtime = runtime
+        self._audit = audit
         self._sessions: dict[str, Session] = {}
         # Pending futures keyed by session_id for idempotent in-flight create.
         self._creating: dict[str, asyncio.Future[Session]] = {}
@@ -113,6 +121,17 @@ class SessionManager:
             async with self._lock:
                 self._sessions[session_id] = session
                 self._creating.pop(session_id, None)
+            if self._audit is not None:
+                self._audit.enqueue_session_created(
+                    {
+                        "session_id": session.session_id,
+                        "conversation_id": session.conversation_id,
+                        "agent_id": session.agent_id,
+                        "container_id": handle.container_id,
+                        "workspace_path": str(handle.workspace_path),
+                        "created_at": session.created_at.isoformat(),
+                    }
+                )
             fut.set_result(session)
         except Exception as exc:
             logger.exception("session create failed: %s", session_id)
@@ -121,7 +140,7 @@ class SessionManager:
             if not fut.done():
                 fut.set_exception(exc)
 
-    async def destroy(self, session_id: str) -> bool:
+    async def destroy(self, session_id: str, reason: str = "explicit") -> bool:
         async with self._lock:
             s = self._sessions.get(session_id)
             if s is None or s.status in (SessionStatus.DESTROYED, SessionStatus.DESTROYING):
@@ -140,10 +159,19 @@ class SessionManager:
 
         async with self._lock:
             self._sessions.pop(session_id, None)
+
+        if self._audit is not None:
+            self._audit.enqueue_session_destroyed(
+                {
+                    "session_id": session_id,
+                    "destroyed_at": utcnow().isoformat(),
+                    "destroyed_reason": reason,
+                }
+            )
         return True
 
     async def shutdown(self) -> None:
         ids = list(self._sessions.keys())
         for sid in ids:
-            await self.destroy(sid)
+            await self.destroy(sid, reason="shutdown")
         await self._runtime.close()
