@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
-# agent-sandbox deploy script for Alibaba Cloud Linux 4 LTS
-# (also works on RHEL 9 / Rocky 9 / AlmaLinux 9 family — anything with dnf).
+# agent-sandbox deploy script for cloud Linux hosts.
+#
+# Verified targets:
+#   - AWS EC2 Amazon Linux 2023      (dnf, python3.11, docker)
+#   - AWS EC2 Ubuntu 22.04 / 24.04   (apt, python3.11 via deadsnakes if needed)
+#   - Alibaba Cloud Linux 4 LTS      (dnf, docker-engine)
+#   - Rocky 9 / AlmaLinux 9 / RHEL 9 (dnf)
+#   - Debian 12+                     (apt)
 #
 # Idempotent: safe to re-run. Each phase is a function; phases short-circuit
 # when the postcondition is already met.
@@ -55,33 +61,83 @@ command -v sudo >/dev/null 2>&1 || fail "sudo is required"
 [ -f /etc/os-release ] || fail "/etc/os-release not found — is this Linux?"
 
 # ───────────────────────────────────────────────────────────────────────────
+# distro detection — picks dnf or apt for Phase 1
+# ───────────────────────────────────────────────────────────────────────────
+detect_distro() {
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    DISTRO_ID="${ID:-unknown}"
+    DISTRO_PRETTY="${PRETTY_NAME:-$DISTRO_ID}"
+    case "$DISTRO_ID" in
+        amzn|alinux|rhel|centos|rocky|almalinux|fedora|ol)
+            PKG_MGR=dnf
+            ;;
+        ubuntu|debian|pop)
+            PKG_MGR=apt
+            ;;
+        *)
+            if command -v dnf >/dev/null 2>&1; then
+                PKG_MGR=dnf
+            elif command -v apt-get >/dev/null 2>&1; then
+                PKG_MGR=apt
+            else
+                fail "unsupported distro '$DISTRO_ID'; only dnf and apt based systems are supported"
+            fi
+            ;;
+    esac
+    log "detected: $DISTRO_PRETTY  (pkg_mgr=$PKG_MGR)"
+}
+
+# ───────────────────────────────────────────────────────────────────────────
 # Phase 1 — system packages (git, python3.11, docker)
 # ───────────────────────────────────────────────────────────────────────────
 phase_system_deps() {
     log "Phase 1/7 — system packages"
 
-    sudo dnf install -y git curl openssl which >/dev/null
-
-    if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
-        log "  installing $PYTHON_BIN ..."
-        # ACL4 / RHEL9 family — python3.11 is a regular dnf package.
-        sudo dnf install -y python3.11 >/dev/null \
-            || fail "couldn't install $PYTHON_BIN; check dnf repos. To override: PYTHON_BIN=python3.x ./deploy.sh"
-        # pip ships with python3.11 in modern packaging; install the standalone
-        # pkg only if it exists (some distros split it out, others don't).
-        sudo dnf install -y python3.11-pip >/dev/null 2>&1 || true
-    fi
+    case "$PKG_MGR" in
+        dnf)
+            sudo dnf install -y git curl openssl which >/dev/null
+            if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+                log "  installing $PYTHON_BIN via dnf ..."
+                sudo dnf install -y python3.11 >/dev/null \
+                    || fail "couldn't install $PYTHON_BIN; check dnf repos"
+                # python3.11-pip is a separate package on some distros, bundled on others.
+                sudo dnf install -y python3.11-pip >/dev/null 2>&1 || true
+            fi
+            if ! command -v docker >/dev/null 2>&1; then
+                log "  installing docker via dnf ..."
+                # AL2023 / Rocky / Alma / RHEL 9 → package name is "docker"
+                # ACL4 → package name is "docker-engine"
+                sudo dnf install -y docker >/dev/null 2>&1 || \
+                    sudo dnf install -y docker-engine >/dev/null || \
+                    fail "couldn't install docker via dnf"
+            fi
+            ;;
+        apt)
+            export DEBIAN_FRONTEND=noninteractive
+            sudo apt-get update -qq
+            sudo apt-get install -y -q git curl openssl ca-certificates >/dev/null
+            if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+                log "  installing $PYTHON_BIN via apt ..."
+                # Ubuntu 24.04 has python3.12 default but python3.11 in repos;
+                # Ubuntu 22.04 needs the deadsnakes PPA for 3.11.
+                if ! sudo apt-get install -y -q python3.11 python3.11-venv >/dev/null 2>&1; then
+                    log "  python3.11 not in default repos; adding deadsnakes PPA"
+                    sudo apt-get install -y -q software-properties-common >/dev/null
+                    sudo add-apt-repository -y ppa:deadsnakes/ppa >/dev/null 2>&1
+                    sudo apt-get update -qq
+                    sudo apt-get install -y -q python3.11 python3.11-venv >/dev/null \
+                        || fail "couldn't install $PYTHON_BIN via apt or deadsnakes"
+                fi
+            fi
+            if ! command -v docker >/dev/null 2>&1; then
+                log "  installing docker via apt ..."
+                sudo apt-get install -y -q docker.io >/dev/null \
+                    || fail "couldn't install docker.io via apt"
+            fi
+            ;;
+    esac
     ok "$($PYTHON_BIN --version)"
-
-    if ! command -v docker >/dev/null 2>&1; then
-        log "  installing docker ..."
-        # ACL4 ships docker-engine in default repos
-        if ! sudo dnf install -y docker-engine >/dev/null 2>&1; then
-            # fall back to docker package name (Rocky / Alma / RHEL 9)
-            sudo dnf install -y docker >/dev/null \
-                || fail "couldn't install docker via dnf; install Docker CE manually"
-        fi
-    fi
     ok "docker present"
 
     sudo systemctl enable --now docker >/dev/null
@@ -285,6 +341,7 @@ phase_verify() {
 # main
 # ───────────────────────────────────────────────────────────────────────────
 main() {
+    detect_distro
     phase_system_deps
     phase_docker_check
     phase_repo
@@ -314,6 +371,14 @@ next steps:
   - put the same SANDBOX_API_KEY into digital-employee's app/.env
   - smoke test:  bash ${REPO_DIR}/scripts/smoke_basic.sh
   - security test:  bash ${REPO_DIR}/scripts/smoke_security.sh
+
+resource tuning:
+  This host has $(nproc) vCPU(s) and $(awk '/MemTotal/{printf "%d", $2/1024}' /proc/meminfo) MiB RAM.
+  Defaults in .env assume a beefier box; on small / shared hosts adjust:
+    MAX_SESSIONS    (default 32 — set to ~ (RAM_MiB - 2048) / MEM_LIMIT_MB)
+    MEM_LIMIT_MB    (default 1024 per sandbox)
+    CPU_NANOS       (default 2000000000 = 2 vCPU per sandbox)
+  After editing .env: sudo systemctl restart ${SERVICE_NAME}
 
 EOF
 }
