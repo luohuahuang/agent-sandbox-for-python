@@ -11,12 +11,16 @@
 #   ./deploy.sh                  # bootstraps everything
 #
 # Environment overrides:
-#   REPO_DIR=/path/to/clone      default: ~/agent-sandbox
-#   BIND_ADDR=0.0.0.0            default: 127.0.0.1  (loopback only)
-#   BIND_PORT=8080               default: 8080
-#   SERVICE_NAME=agent-sandbox   systemd unit name
-#   PYTHON_BIN=python3.11        which Python to use
-#   SANDBOX_API_KEY=...          if unset, a random hex32 is generated
+#   REPO_DIR=/path/to/clone        default: ~/agent-sandbox
+#   BIND_ADDR=0.0.0.0              default: 127.0.0.1  (loopback only)
+#   BIND_PORT=8080                 default: 8080
+#   SERVICE_NAME=agent-sandbox     systemd unit name
+#   PYTHON_BIN=python3.11          which Python to use
+#   SANDBOX_API_KEY=...            if unset, a random hex32 is generated
+#   DOCKER_REGISTRY_MIRROR=https://docker.m.daocloud.io
+#                                  for CN-region ECS where docker.io is
+#                                  unreachable; writes /etc/docker/daemon.json
+#                                  and restarts the daemon
 
 set -euo pipefail
 
@@ -78,6 +82,26 @@ phase_system_deps() {
 
     sudo systemctl enable --now docker >/dev/null
     ok "docker daemon enabled + running"
+
+    # Registry mirror — required on CN-region ECS where docker.io is blocked.
+    if [ -n "${DOCKER_REGISTRY_MIRROR:-}" ]; then
+        if [ ! -f /etc/docker/daemon.json ]; then
+            log "  writing /etc/docker/daemon.json with mirror $DOCKER_REGISTRY_MIRROR"
+            sudo mkdir -p /etc/docker
+            sudo tee /etc/docker/daemon.json > /dev/null <<EOF
+{
+  "registry-mirrors": ["$DOCKER_REGISTRY_MIRROR"]
+}
+EOF
+            sudo systemctl restart docker
+            ok "registry mirror configured"
+        elif sudo grep -q "$DOCKER_REGISTRY_MIRROR" /etc/docker/daemon.json; then
+            ok "registry mirror already in daemon.json"
+        else
+            warn "/etc/docker/daemon.json exists and does not contain $DOCKER_REGISTRY_MIRROR"
+            warn "  merge it in by hand, then 'sudo systemctl restart docker'"
+        fi
+    fi
 
     if ! id -nG "$USER" | grep -qw docker; then
         log "  adding $USER to docker group ..."
