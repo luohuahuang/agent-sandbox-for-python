@@ -97,12 +97,22 @@ class SessionManager:
                 f"failed to create session: {exc}",
             ) from exc
 
+    def _resolve_image(self, template: str) -> str:
+        """Map template name → Docker image, falling back to default image."""
+        templates = self._settings.sandbox_templates
+        if template in templates:
+            return templates[template]
+        if "default" in templates:
+            return templates["default"]
+        return self._settings.sandbox_image
+
     async def _create_task(
         self, req: CreateSessionRequest, fut: asyncio.Future[Session]
     ) -> None:
         session_id = req.conversation_id
         try:
-            handle = await self._runtime.create(session_id)
+            image = self._resolve_image(req.template)
+            handle = await self._runtime.create(session_id, image=image)
             kc = KernelClient(handle.host_ports, handle.kernel_key)
             try:
                 await kc.start()

@@ -7,7 +7,9 @@ from pydantic import BaseModel, Field
 class CreateSessionRequest(BaseModel):
     conversation_id: str = Field(min_length=1, max_length=128)
     agent_id: str | None = Field(default=None, max_length=128)
-    image: str | None = None
+    # Template name resolved to a Docker image via SANDBOX_TEMPLATES config.
+    # Falls back to "default" if omitted.
+    template: str = Field(default="default", max_length=64)
     env: dict[str, str] | None = None
 
 

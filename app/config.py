@@ -10,6 +10,12 @@ class Settings(BaseSettings):
     sandbox_api_key: str = Field(default="change-me-please")
 
     sandbox_image: str = Field(default="agent-sandbox:latest")
+    # Map of template name → Docker image. The "default" key is the fallback
+    # used when no template is specified. Add entries in .env as a JSON string:
+    #   SANDBOX_TEMPLATES={"default":"agent-sandbox:latest","automation":"agent-sandbox:automation"}
+    sandbox_templates: dict[str, str] = Field(
+        default_factory=lambda: {"default": "agent-sandbox:latest"}
+    )
     # Defaults to a path inside $HOME because Colima's Lima VM only mounts
     # /Users by default. Override via WORKSPACE_ROOT for production setups.
     workspace_root: Path = Field(

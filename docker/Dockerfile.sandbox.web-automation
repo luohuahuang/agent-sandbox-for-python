@@ -1,0 +1,83 @@
+FROM python:3.11-slim
+
+# Optional PyPI mirror for build-time pip install.
+ARG PIP_INDEX_URL=""
+ARG PIP_TRUSTED_HOST=""
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_INDEX_URL=${PIP_INDEX_URL} \
+    PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} \
+    # Tell Playwright to install browsers here (writable at build time).
+    PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+
+RUN useradd -u 1000 -m sbx
+
+# ── System deps ──────────────────────────────────────────────────────────────
+# Playwright's Chromium needs these shared libs.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        # Chromium runtime deps
+        libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+        libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+        libgbm1 libasound2 libpango-1.0-0 libcairo2 libx11-6 libx11-xcb1 \
+        libxcb1 libxext6 libxcursor1 libxi6 libxtst6 \
+        # Process utilities used by Playwright
+        ca-certificates fonts-liberation \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Python packages ──────────────────────────────────────────────────────────
+# Pinned minor versions; patch versions left floating for security fixes.
+RUN pip install --no-cache-dir \
+    \
+    # ── Jupyter kernel (required by sandbox gateway) ──
+    ipykernel==6.29.5 \
+    jupyter_client==8.6.2 \
+    \
+    # ── Core data / utility (inherited from default image) ──
+    numpy \
+    pandas \
+    matplotlib \
+    requests \
+    httpx \
+    \
+    # ── Web automation ──
+    playwright \
+    pytest-playwright \
+    \
+    # ── API automation ──
+    pytest \
+    pytest-asyncio \
+    pytest-html \
+    pytest-xdist \
+    respx \
+    jsonschema \
+    \
+    # ── Test data & assertions ──
+    faker \
+    pydantic \
+    deepdiff \
+    \
+    # ── Reporting ──
+    allure-pytest
+
+# ── Playwright: install Chromium only ────────────────────────────────────────
+# --with-deps is skipped here because we installed system deps above;
+# --no-shell ensures it doesn't rely on a login shell.
+RUN playwright install chromium
+
+# Make browsers readable/executable by the sbx user.
+RUN mkdir -p /opt/pw-browsers && chown -R 1000:1000 /opt/pw-browsers
+
+# ── Workspace ────────────────────────────────────────────────────────────────
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh && \
+    mkdir -p /workspace && chown 1000:1000 /workspace
+
+USER sbx
+WORKDIR /workspace
+
+EXPOSE 5555 5556 5557 5558 5559
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

@@ -138,10 +138,11 @@ class DockerRuntime:
 
         return await asyncio.to_thread(_ping)
 
-    async def create(self, session_id: str) -> ContainerHandle:
+    async def create(self, session_id: str, image: str | None = None) -> ContainerHandle:
         """Start a sandbox container and return the handle once it's running."""
         settings = self._settings
         kernel_key = secrets.token_urlsafe(32)
+        image = image or settings.sandbox_image
 
         workspace_path = settings.workspace_root / session_id
         workspace_path.mkdir(parents=True, exist_ok=True)
@@ -175,7 +176,7 @@ class DockerRuntime:
             client = self._client_or_connect()
             try:
                 return client.containers.run(
-                    image=settings.sandbox_image,
+                    image=image,
                     detach=True,
                     name=f"sbx-{session_id}",
                     environment=env,
