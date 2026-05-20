@@ -170,6 +170,34 @@ class SessionManager:
             )
         return True
 
+    # ----- background reaper -------------------------------------------
+
+    async def start_reaper(self) -> None:
+        """Continuously evict sessions that have exceeded idle_ttl or max_age."""
+        import time as _time
+
+        while True:
+            await asyncio.sleep(120)  # check every 2 minutes
+            now = _time.monotonic()
+            to_destroy: list[str] = []
+            async with self._lock:
+                for sid, s in list(self._sessions.items()):
+                    if s.status != SessionStatus.READY:
+                        continue
+                    idle = s.idle_seconds()
+                    age = int(now - _time.mktime(s.created_at.timetuple()))
+                    if idle > self._settings.idle_ttl_s:
+                        logger.info("reaper: evicting %s (idle %ds)", sid, idle)
+                        to_destroy.append(sid)
+                    elif age > self._settings.max_age_s:
+                        logger.info("reaper: evicting %s (age %ds)", sid, age)
+                        to_destroy.append(sid)
+            for sid in to_destroy:
+                try:
+                    await self.destroy(sid, reason="ttl_expired")
+                except Exception as exc:
+                    logger.warning("reaper: error destroying %s: %s", sid, exc)
+
     async def shutdown(self) -> None:
         ids = list(self._sessions.keys())
         for sid in ids:

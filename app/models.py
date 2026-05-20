@@ -83,3 +83,23 @@ class AuditRecord(BaseModel):
 class SessionExecListResponse(BaseModel):
     session_id: str
     execs: list[AuditRecord]
+
+
+class FileEntry(BaseModel):
+    name: str
+    path: str
+    size_bytes: int
+    is_dir: bool
+
+
+class FileListResponse(BaseModel):
+    files: list[FileEntry]
+
+
+class FileUploadResponse(BaseModel):
+    path: str
+    size_bytes: int
+
+
+class FileDeleteResponse(BaseModel):
+    deleted: bool

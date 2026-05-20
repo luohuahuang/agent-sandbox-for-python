@@ -11,6 +11,7 @@ from app.audit import AuditWriter
 from app.config import get_settings
 from app.routers import audit as audit_router
 from app.routers import exec as exec_router
+from app.routers import files as files_router
 from app.routers import health, sessions
 from app.runtime.docker_runtime import DockerRuntime
 from app.runtime.manager import SessionManager
@@ -43,6 +44,8 @@ async def lifespan(app: FastAPI):
             exc,
         )
 
+    import asyncio as _asyncio
+
     manager = SessionManager(settings, runtime, audit)
     app.state.settings = settings
     app.state.runtime = runtime
@@ -50,11 +53,14 @@ async def lifespan(app: FastAPI):
     app.state.proxy = proxy
     app.state.audit = audit
 
+    reaper_task = _asyncio.create_task(manager.start_reaper())
+
     logger.info("agent-sandbox gateway starting (image=%s)", settings.sandbox_image)
     try:
         yield
     finally:
         logger.info("agent-sandbox gateway shutting down")
+        reaper_task.cancel()
         await manager.shutdown()
         if proxy is not None:
             await proxy.stop()
@@ -72,6 +78,7 @@ def create_app() -> FastAPI:
     app.include_router(sessions.router)
     app.include_router(exec_router.router)
     app.include_router(audit_router.router)
+    app.include_router(files_router.router)
     return app
 
 

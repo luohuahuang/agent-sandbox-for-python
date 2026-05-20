@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     mem_limit_mb: int = 1024
     cpu_nanos: int = 2_000_000_000
     pids_limit: int = 256
+    file_upload_max_mb: int = 50
 
     exec_timeout_s: int = 60
     kill_grace_s: int = 5
