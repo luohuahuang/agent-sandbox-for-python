@@ -4,13 +4,19 @@ A standalone HTTP service that runs LLM-generated code inside **per-session Dock
 
 ## Status
 
-Phase 3 — sandbox-local audit DB + live resource sampling. See the
-implementation plan for the full phase breakdown.
+Phase 4 — Files API + idle session reaper. See the implementation plan
+for the full phase breakdown.
 
 What's in today:
 
 - `POST /v1/sessions`, `POST /v1/sessions/{id}/exec` (non-streaming),
   `DELETE /v1/sessions/{id}`, `GET /v1/sessions`, `GET /healthz`.
+- **`POST /v1/sessions/{id}/files`** — upload any file (multipart) into the
+  session's `/workspace`; the file is immediately available to subsequent
+  `exec` calls. Returns `{ path, filename, size_bytes }`.
+- **Idle session reaper**: background task checks every 120 s; evicts sessions
+  that exceed `IDLE_TTL_S` (default 1800 s) or `MAX_AGE_S` (default 7200 s).
+  Prevents container accumulation and "too many open files" crashes under load.
 - **`GET /v1/audit/{audit_id}`** and **`GET /v1/audit/sessions/{id}/execs`**
   return full exec history (complete stdout / stderr / code, no 300-char
   truncation), persisted to a sandbox-local SQLite DB at `AUDIT_DB_PATH`.
@@ -36,10 +42,9 @@ What's in today:
 
 Still deferred:
 
-- Idle reaper + `/metrics` (Phase 4)
-- Files API for upload/download of artifacts (Phase 5, on demand)
-- SSE streaming + interrupt (Phase 6, on demand)
-- CI + ruff pre-commit (Phase 7)
+- SSE streaming + interrupt (Phase 5, on demand)
+- `/metrics` Prometheus endpoint (Phase 5, on demand)
+- CI + ruff pre-commit (Phase 6)
 
 ## Quickstart (developer, macOS + Colima)
 
