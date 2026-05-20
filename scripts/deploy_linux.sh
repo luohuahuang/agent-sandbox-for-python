@@ -267,6 +267,21 @@ phase_images() {
     fi
     ok "agent-sandbox:latest present"
 
+    if ! docker image inspect agent-sandbox:web-automation >/dev/null 2>&1; then
+        log "  building agent-sandbox:web-automation (~5-8 min on first run, includes Playwright/Chromium)"
+        local build_args=()
+        if [ -n "${PIP_INDEX_URL:-}" ]; then
+            build_args+=(--build-arg "PIP_INDEX_URL=$PIP_INDEX_URL")
+            local host
+            host=$(echo "$PIP_INDEX_URL" | awk -F[/:] '{print $4}')
+            [ -n "$host" ] && build_args+=(--build-arg "PIP_TRUSTED_HOST=$host")
+        fi
+        docker build "${build_args[@]}" -t agent-sandbox:web-automation \
+            -f "$REPO_DIR/docker/Dockerfile.sandbox.web-automation" \
+            "$REPO_DIR/docker/" >/dev/null
+    fi
+    ok "agent-sandbox:web-automation present"
+
     if ! docker image inspect ubuntu/squid:latest >/dev/null 2>&1; then
         log "  pulling ubuntu/squid:latest"
         docker pull ubuntu/squid:latest >/dev/null
