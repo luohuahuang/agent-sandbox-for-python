@@ -12,7 +12,7 @@
 # when the postcondition is already met.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/luohuahuang/agent-sandbox-for-python/main/scripts/deploy_linux.sh -o deploy.sh
+#   curl -fsSL https://raw.githubusercontent.com/luohuahuang/agent-sandbox/main/scripts/deploy_linux.sh -o deploy.sh
 #   chmod +x deploy.sh
 #   ./deploy.sh                  # bootstraps everything
 #
@@ -34,7 +34,7 @@
 
 set -euo pipefail
 
-REPO_URL="${REPO_URL:-https://github.com/luohuahuang/agent-sandbox-for-python.git}"
+REPO_URL="${REPO_URL:-https://github.com/luohuahuang/agent-sandbox.git}"
 REPO_DIR="${REPO_DIR:-$HOME/agent-sandbox}"
 BIND_ADDR="${BIND_ADDR:-127.0.0.1}"
 BIND_PORT="${BIND_PORT:-8080}"
@@ -320,7 +320,7 @@ phase_systemd() {
     sudo tee "$unit" > /dev/null <<EOF
 [Unit]
 Description=agent-sandbox gateway (per-session Jupyter kernel in Docker)
-Documentation=https://github.com/luohuahuang/agent-sandbox-for-python
+Documentation=https://github.com/luohuahuang/agent-sandbox
 After=docker.service network-online.target
 Requires=docker.service
 
