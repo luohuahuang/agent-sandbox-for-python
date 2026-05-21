@@ -10,12 +10,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_INDEX_URL=${PIP_INDEX_URL} \
     PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} \
-    # Appium server and ADB server both run on the HOST, not in this container.
-    # This image supports both Android and iOS app UI automation:
-    #   Android: adb client → host ADB server (5037) → USB/WiFi device
-    #   iOS:     Appium-Python-Client → host Appium server (4723) → WebDriverAgent on device
-    # host.docker.internal resolves to the host gateway via extra_hosts
-    # injected by docker_runtime.py (Docker 20.10+).
+    PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers \
+    # ADB client and Appium server run on the HOST; this container connects
+    # via host.docker.internal (injected by docker_runtime.py).
     ANDROID_ADB_SERVER_ADDRESS=host.docker.internal \
     ANDROID_ADB_SERVER_PORT=5037 \
     APPIUM_HOST=host.docker.internal \
@@ -24,8 +21,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN useradd -u 1000 -m sbx
 
 # ── System deps ──────────────────────────────────────────────────────────────
-# adb client only — no server, no USB daemon needed.
 RUN apt-get update && apt-get install -y --no-install-recommends \
+        # Playwright/Chromium runtime deps
+        libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+        libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+        libgbm1 libasound2 libpango-1.0-0 libcairo2 libx11-6 libx11-xcb1 \
+        libxcb1 libxext6 libxcursor1 libxi6 libxtst6 \
+        ca-certificates fonts-liberation \
+        # ADB client for Android/iOS automation via host ADB server
         adb \
     && rm -rf /var/lib/apt/lists/*
 
@@ -39,17 +42,18 @@ RUN pip install --no-cache-dir \
     # ── Core data / utility ──
     numpy \
     pandas \
+    matplotlib \
     requests \
     httpx \
     \
+    # ── Web automation ──
+    playwright \
+    pytest-playwright \
+    respx \
+    \
     # ── App automation (Android + iOS) ──
-    # Appium-Python-Client: WebDriver-based client connecting to host Appium server
-    # (host.docker.internal:4723); supports Android and iOS via the same API.
     Appium-Python-Client \
-    # uiautomator2: Android-only lighter-weight alternative via adb + on-device agent;
-    # useful when full Appium stack is not available.
     uiautomator2 \
-    # pure-python-adb: Android low-level adb-server TCP protocol (shell, file push/pull)
     pure-python-adb \
     \
     # ── Test framework ──
@@ -64,6 +68,11 @@ RUN pip install --no-cache-dir \
     pydantic \
     deepdiff \
     jsonschema
+
+# ── Playwright: install Chromium only ────────────────────────────────────────
+RUN playwright install chromium
+
+RUN mkdir -p /opt/pw-browsers && chown -R 1000:1000 /opt/pw-browsers
 
 # ── Workspace ────────────────────────────────────────────────────────────────
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
