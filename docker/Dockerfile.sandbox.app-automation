@@ -10,7 +10,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_INDEX_URL=${PIP_INDEX_URL} \
     PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} \
-    # Both ADB server and Appium server run on the HOST, not in this container.
+    # Appium server and ADB server both run on the HOST, not in this container.
+    # This image supports both Android and iOS app UI automation:
+    #   Android: adb client → host ADB server (5037) → USB/WiFi device
+    #   iOS:     Appium-Python-Client → host Appium server (4723) → WebDriverAgent on device
     # host.docker.internal resolves to the host gateway via extra_hosts
     # injected by docker_runtime.py (Docker 20.10+).
     ANDROID_ADB_SERVER_ADDRESS=host.docker.internal \
@@ -39,15 +42,14 @@ RUN pip install --no-cache-dir \
     requests \
     httpx \
     \
-    # ── Android automation ──
-    # Appium-Python-Client: WebDriver-based client that talks to Appium server
-    # on the host over HTTP (host.docker.internal:4723). Appium server itself
-    # is a Node.js process that must run on the host alongside adb server.
+    # ── App automation (Android + iOS) ──
+    # Appium-Python-Client: WebDriver-based client connecting to host Appium server
+    # (host.docker.internal:4723); supports Android and iOS via the same API.
     Appium-Python-Client \
-    # uiautomator2: lighter-weight UI automation via adb + on-device agent;
-    # useful when full Appium setup is not available.
+    # uiautomator2: Android-only lighter-weight alternative via adb + on-device agent;
+    # useful when full Appium stack is not available.
     uiautomator2 \
-    # pure-python-adb: direct adb-server TCP protocol for low-level shell/file ops
+    # pure-python-adb: Android low-level adb-server TCP protocol (shell, file push/pull)
     pure-python-adb \
     \
     # ── Test framework ──
