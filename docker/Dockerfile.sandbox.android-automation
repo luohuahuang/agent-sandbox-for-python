@@ -10,12 +10,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_INDEX_URL=${PIP_INDEX_URL} \
     PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} \
-    # ADB client points to the host-side ADB server (TCP relay).
-    # The container never talks to USB directly; the host ADB server owns
-    # the physical/emulator connection. host.docker.internal resolves to
-    # the host gateway via the extra_hosts injected by docker_runtime.py.
+    # Both ADB server and Appium server run on the HOST, not in this container.
+    # host.docker.internal resolves to the host gateway via extra_hosts
+    # injected by docker_runtime.py (Docker 20.10+).
     ANDROID_ADB_SERVER_ADDRESS=host.docker.internal \
-    ANDROID_ADB_SERVER_PORT=5037
+    ANDROID_ADB_SERVER_PORT=5037 \
+    APPIUM_HOST=host.docker.internal \
+    APPIUM_PORT=4723
 
 RUN useradd -u 1000 -m sbx
 
@@ -39,17 +40,28 @@ RUN pip install --no-cache-dir \
     httpx \
     \
     # ── Android automation ──
-    # pure-python-adb: talks to adb server over TCP (no native binary needed)
-    pure-python-adb \
-    # uiautomator2: high-level UI automation via adb + UIAutomator2 agent on device
+    # Appium-Python-Client: WebDriver-based client that talks to Appium server
+    # on the host over HTTP (host.docker.internal:4723). Appium server itself
+    # is a Node.js process that must run on the host alongside adb server.
+    Appium-Python-Client \
+    # uiautomator2: lighter-weight UI automation via adb + on-device agent;
+    # useful when full Appium setup is not available.
     uiautomator2 \
+    # pure-python-adb: direct adb-server TCP protocol for low-level shell/file ops
+    pure-python-adb \
     \
     # ── Test framework ──
     pytest \
     pytest-asyncio \
     pytest-html \
+    pytest-xdist \
+    allure-pytest \
+    \
+    # ── Test data & assertions ──
     faker \
-    pydantic
+    pydantic \
+    deepdiff \
+    jsonschema
 
 # ── Workspace ────────────────────────────────────────────────────────────────
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
