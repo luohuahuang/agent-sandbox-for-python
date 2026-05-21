@@ -1,0 +1,64 @@
+FROM python:3.11-slim
+
+# Optional PyPI mirror for build-time pip install.
+ARG PIP_INDEX_URL=""
+ARG PIP_TRUSTED_HOST=""
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_INDEX_URL=${PIP_INDEX_URL} \
+    PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} \
+    # ADB client points to the host-side ADB server (TCP relay).
+    # The container never talks to USB directly; the host ADB server owns
+    # the physical/emulator connection. host.docker.internal resolves to
+    # the host gateway via the extra_hosts injected by docker_runtime.py.
+    ANDROID_ADB_SERVER_ADDRESS=host.docker.internal \
+    ANDROID_ADB_SERVER_PORT=5037
+
+RUN useradd -u 1000 -m sbx
+
+# ── System deps ──────────────────────────────────────────────────────────────
+# adb client only — no server, no USB daemon needed.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        adb \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Python packages ──────────────────────────────────────────────────────────
+RUN pip install --no-cache-dir \
+    \
+    # ── Jupyter kernel (required by sandbox gateway) ──
+    ipykernel==6.29.5 \
+    jupyter_client==8.6.2 \
+    \
+    # ── Core data / utility ──
+    numpy \
+    pandas \
+    requests \
+    httpx \
+    \
+    # ── Android automation ──
+    # pure-python-adb: talks to adb server over TCP (no native binary needed)
+    pure-python-adb \
+    # uiautomator2: high-level UI automation via adb + UIAutomator2 agent on device
+    uiautomator2 \
+    \
+    # ── Test framework ──
+    pytest \
+    pytest-asyncio \
+    pytest-html \
+    faker \
+    pydantic
+
+# ── Workspace ────────────────────────────────────────────────────────────────
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh && \
+    mkdir -p /workspace && chown 1000:1000 /workspace
+
+USER sbx
+WORKDIR /workspace
+
+EXPOSE 5555 5556 5557 5558 5559
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
