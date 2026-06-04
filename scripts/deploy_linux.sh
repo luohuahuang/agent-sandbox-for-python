@@ -12,7 +12,7 @@
 # when the postcondition is already met.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/luohuahuang/agent-sandbox-for-python/main/scripts/deploy_linux.sh -o deploy.sh
+#   curl -fsSL https://raw.githubusercontent.com/luohuahuang/agent-sandbox/main/scripts/deploy_linux.sh -o deploy.sh
 #   chmod +x deploy.sh
 #   ./deploy.sh                  # bootstraps everything
 #
@@ -34,7 +34,7 @@
 
 set -euo pipefail
 
-REPO_URL="${REPO_URL:-https://github.com/luohuahuang/agent-sandbox-for-python.git}"
+REPO_URL="${REPO_URL:-https://github.com/luohuahuang/agent-sandbox.git}"
 REPO_DIR="${REPO_DIR:-$HOME/agent-sandbox}"
 BIND_ADDR="${BIND_ADDR:-127.0.0.1}"
 BIND_PORT="${BIND_PORT:-8080}"
@@ -245,42 +245,50 @@ phase_venv() {
 }
 
 # ───────────────────────────────────────────────────────────────────────────
-# Phase 5 — sandbox image + squid image
+# Phase 5 — sandbox images + squid image
+#
+# Auto-discovers every docker/Dockerfile.sandbox* in the repo and builds
+# the corresponding agent-sandbox:<tag> image:
+#   Dockerfile.sandbox                 → agent-sandbox:latest
+#   Dockerfile.sandbox.<suffix>        → agent-sandbox:<suffix>
+# Adding a new template Dockerfile requires no changes to this script.
 # ───────────────────────────────────────────────────────────────────────────
 phase_images() {
     log "Phase 5/7 — docker images"
 
-    if ! docker image inspect agent-sandbox:latest >/dev/null 2>&1; then
-        log "  building agent-sandbox:latest (~2-3 min on first run)"
-        local build_args=()
-        if [ -n "${PIP_INDEX_URL:-}" ]; then
-            build_args+=(--build-arg "PIP_INDEX_URL=$PIP_INDEX_URL")
-            # Derive the trusted host (skip cert checks for http mirrors).
-            local host
-            host=$(echo "$PIP_INDEX_URL" | awk -F[/:] '{print $4}')
-            [ -n "$host" ] && build_args+=(--build-arg "PIP_TRUSTED_HOST=$host")
-            log "  using PyPI mirror: $PIP_INDEX_URL"
-        fi
-        docker build "${build_args[@]}" -t agent-sandbox:latest \
-            -f "$REPO_DIR/docker/Dockerfile.sandbox" \
-            "$REPO_DIR/docker/" >/dev/null
+    local build_args=()
+    if [ -n "${PIP_INDEX_URL:-}" ]; then
+        build_args+=(--build-arg "PIP_INDEX_URL=$PIP_INDEX_URL")
+        local mirror_host
+        mirror_host=$(echo "$PIP_INDEX_URL" | awk -F[/:] '{print $4}')
+        [ -n "$mirror_host" ] && build_args+=(--build-arg "PIP_TRUSTED_HOST=$mirror_host")
+        log "  using PyPI mirror: $PIP_INDEX_URL"
     fi
-    ok "agent-sandbox:latest present"
 
-    if ! docker image inspect agent-sandbox:web-automation >/dev/null 2>&1; then
-        log "  building agent-sandbox:web-automation (~5-8 min on first run, includes Playwright/Chromium)"
-        local build_args=()
-        if [ -n "${PIP_INDEX_URL:-}" ]; then
-            build_args+=(--build-arg "PIP_INDEX_URL=$PIP_INDEX_URL")
-            local host
-            host=$(echo "$PIP_INDEX_URL" | awk -F[/:] '{print $4}')
-            [ -n "$host" ] && build_args+=(--build-arg "PIP_TRUSTED_HOST=$host")
+    local found=0
+    local dockerfile tag image
+    for dockerfile in "$REPO_DIR"/docker/Dockerfile.sandbox*; do
+        [ -f "$dockerfile" ] || continue
+        found=$((found + 1))
+        local fname
+        fname=$(basename "$dockerfile")
+        if [ "$fname" = "Dockerfile.sandbox" ]; then
+            tag="latest"
+        else
+            tag="${fname#Dockerfile.sandbox.}"
         fi
-        docker build "${build_args[@]}" -t agent-sandbox:web-automation \
-            -f "$REPO_DIR/docker/Dockerfile.sandbox.web-automation" \
-            "$REPO_DIR/docker/" >/dev/null
+        image="agent-sandbox:$tag"
+        if ! docker image inspect "$image" >/dev/null 2>&1; then
+            log "  building $image from $fname ..."
+            docker build "${build_args[@]}" -t "$image" \
+                -f "$dockerfile" "$REPO_DIR/docker/" >/dev/null
+        fi
+        ok "$image present"
+    done
+
+    if [ "$found" -eq 0 ]; then
+        warn "no Dockerfile.sandbox* found in $REPO_DIR/docker/ — skipping image builds"
     fi
-    ok "agent-sandbox:web-automation present"
 
     if ! docker image inspect ubuntu/squid:latest >/dev/null 2>&1; then
         log "  pulling ubuntu/squid:latest"
@@ -320,7 +328,7 @@ phase_systemd() {
     sudo tee "$unit" > /dev/null <<EOF
 [Unit]
 Description=agent-sandbox gateway (per-session Jupyter kernel in Docker)
-Documentation=https://github.com/luohuahuang/agent-sandbox-for-python
+Documentation=https://github.com/luohuahuang/agent-sandbox
 After=docker.service network-online.target
 Requires=docker.service
 

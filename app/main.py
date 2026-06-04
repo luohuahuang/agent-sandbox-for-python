@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from app.audit import AuditWriter
 from app.config import get_settings
 from app.routers import audit as audit_router
+from app.routers import env as env_router
 from app.routers import exec as exec_router
 from app.routers import files as files_router
 from app.routers import health, sessions
@@ -79,6 +80,7 @@ def create_app() -> FastAPI:
     app.include_router(exec_router.router)
     app.include_router(audit_router.router)
     app.include_router(files_router.router)
+    app.include_router(env_router.router)
     return app
 
 

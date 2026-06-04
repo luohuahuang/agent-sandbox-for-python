@@ -200,6 +200,11 @@ class DockerRuntime:
                         Ulimit(name="nofile", soft=1024, hard=1024),
                         Ulimit(name="nproc", soft=256, hard=256),
                     ],
+                    # Expose host machine as host.docker.internal so templates
+                    # that need to reach host services (e.g. app-automation
+                    # connecting to the host ADB/Appium server) can resolve it
+                    # without any extra config. Harmless for other templates.
+                    extra_hosts={"host.docker.internal": "host-gateway"},
                 )
             except ImageNotFound:
                 raise RuntimeError(
