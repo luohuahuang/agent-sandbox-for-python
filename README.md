@@ -132,7 +132,7 @@ DELETE /v1/sessions/conv-123
 -> { "stopped": true }
 ```
 
-## Layout
+## Layoutt - typo
 
 ```
 app/        FastAPI gateway code
